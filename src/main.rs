@@ -1,7 +1,7 @@
 use axum::{
     extract::State,
-    response::Html,
-    response::IntoResponse,
+    http::StatusCode,
+    response::{Html, IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
@@ -18,7 +18,7 @@ async fn main() {
         .route("/", get(root))
         .route("/auth/signin", post(signin))
         .with_state(db);
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:9080").await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
 #[derive(Debug, Deserialize, Serialize)]
@@ -35,7 +35,7 @@ struct User {
 async fn signin(
     State(db): State<Database>,
     Json(payload): Json<SigninPayload>,
-) -> Result<Json<Value>, Json<Value>> {
+) -> Result<Json<Value>, AppError> {
     println!("{:?} ", payload);
     let payload_username = payload.username;
     let payload_password: String = payload.password;
@@ -45,15 +45,15 @@ async fn signin(
         .await;
 
     match result {
-        Ok(Some(_user)) => Err(Json(json!(
-        { "data": "username is existed","status": "fail",}
-        ))),
+        Ok(Some(_user)) => {
+            let app_error = AppError(anyhow::Error::msg("An error occurred"));
+            Err(app_error)
+        }
         Ok(None) => Ok(Json(json!({ "data": "username is existed" }))),
         Err(e) => {
             println!("error parsing header: {e:?}");
-            Err(Json(
-                json!({ "data": "something went wrong","status": "fail" }),
-            ))
+            let app_error = AppError(anyhow::Error::msg("An error occurred 123132"));
+            Err(app_error)
         }
     }
 
@@ -75,4 +75,17 @@ async fn connect_mongodb() -> mongodb::Database {
     let db: mongodb::Database = client.database(db_name.as_str());
     println!("Connect db success");
     db
+}
+
+struct AppError(anyhow::Error);
+
+// Tell axum how to convert `AppError` into a response.
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Something went wrong: {}", self.0),
+        )
+            .into_response()
+    }
 }
